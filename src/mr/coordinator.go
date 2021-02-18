@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"container/list"
 	"fmt"
 	"log"
 	"net"
@@ -15,7 +14,6 @@ type Coordinator struct {
 	// Your definitions here.
 	mu                sync.Mutex
 	nReduce           int
-	queue             list.List
 	mapTaskChecker    []int
 	mapFiles          []string
 	mapDone           int
