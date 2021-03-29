@@ -597,22 +597,24 @@ func TestPersist12C(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
-
+	
 	cfg.begin("Test (2C): basic persistence")
-
+	// DPrintf("Test 2C: one")
 	cfg.one(11, servers, true)
-
+	
 	// crash and re-start all
 	for i := 0; i < servers; i++ {
+		// DPrintf("Test 2C: [start1][%v]", i)
 		cfg.start1(i, cfg.applier)
 	}
 	for i := 0; i < servers; i++ {
+		// DPrintf("Test 2C: [dis/connect][%v]", i)
 		cfg.disconnect(i)
 		cfg.connect(i)
 	}
-
+	DPrintf("Test 2C: one")
 	cfg.one(12, servers, true)
-
+	// DPrintf("Test 2C: leader1")
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
 	cfg.start1(leader1, cfg.applier)
@@ -925,6 +927,7 @@ func internalChurn(t *testing.T, unreliable bool) {
 		}
 		ret = values
 	}
+	DPrintf("Test3C last test1")
 
 	ncli := 3
 	cha := []chan []int{}
@@ -932,10 +935,10 @@ func internalChurn(t *testing.T, unreliable bool) {
 		cha = append(cha, make(chan []int))
 		go cfn(i, cha[i])
 	}
-
 	for iters := 0; iters < 20; iters++ {
 		if (rand.Int() % 1000) < 200 {
 			i := rand.Int() % servers
+			DPrintf("Test3C disconnect i: %v", i)
 			cfg.disconnect(i)
 		}
 
@@ -944,12 +947,14 @@ func internalChurn(t *testing.T, unreliable bool) {
 			if cfg.rafts[i] == nil {
 				cfg.start1(i, cfg.applier)
 			}
+			DPrintf("Test3C connect i: %v", i)
 			cfg.connect(i)
 		}
 
 		if (rand.Int() % 1000) < 200 {
 			i := rand.Int() % servers
 			if cfg.rafts[i] != nil {
+				DPrintf("Test3C crash i: %v", i)
 				cfg.crash1(i)
 			}
 		}
@@ -963,6 +968,7 @@ func internalChurn(t *testing.T, unreliable bool) {
 
 	time.Sleep(RaftElectionTimeout)
 	cfg.setunreliable(false)
+	DPrintf("Test3C last test3")
 	for i := 0; i < servers; i++ {
 		if cfg.rafts[i] == nil {
 			cfg.start1(i, cfg.applier)
@@ -971,7 +977,7 @@ func internalChurn(t *testing.T, unreliable bool) {
 	}
 
 	atomic.StoreInt32(&stop, 1)
-
+	DPrintf("Test3C last test4")
 	values := []int{}
 	for i := 0; i < ncli; i++ {
 		vv := <-cha[i]
@@ -982,9 +988,9 @@ func internalChurn(t *testing.T, unreliable bool) {
 	}
 
 	time.Sleep(RaftElectionTimeout)
-
+    DPrintf("Last test")
 	lastIndex := cfg.one(rand.Int(), servers, true)
-
+	DPrintf("Test3C last test5")
 	really := make([]int, lastIndex+1)
 	for index := 1; index <= lastIndex; index++ {
 		v := cfg.wait(index, servers, -1)
