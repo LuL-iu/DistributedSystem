@@ -130,7 +130,7 @@ func TestBasicAgree2B(t *testing.T) {
 
 	iters := 3
 	for index := 1; index < iters+1; index++ {
-		DPrintf("[%v]", index)
+		DPrintf("[TestBasicAgree2B][%v]", index)
 		nd, _ := cfg.nCommitted(index)
 		DPrintf("nd is %v", nd)
 		if nd > 0 {
@@ -597,11 +597,11 @@ func TestPersist12C(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
-	
+
 	cfg.begin("Test (2C): basic persistence")
 	// DPrintf("Test 2C: one")
 	cfg.one(11, servers, true)
-	
+
 	// crash and re-start all
 	for i := 0; i < servers; i++ {
 		// DPrintf("Test 2C: [start1][%v]", i)
@@ -988,7 +988,7 @@ func internalChurn(t *testing.T, unreliable bool) {
 	}
 
 	time.Sleep(RaftElectionTimeout)
-    DPrintf("Last test")
+	DPrintf("Last test")
 	lastIndex := cfg.one(rand.Int(), servers, true)
 	DPrintf("Test3C last test5")
 	really := make([]int, lastIndex+1)
@@ -1046,19 +1046,23 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 		}
 
 		if disconnect {
+			DPrintf("[snapcommon][disconnect][%v] itres=%v, leader=%v\n", victim, i, leader1)
 			cfg.disconnect(victim)
 			cfg.one(rand.Int(), servers-1, true)
 		}
 		if crash {
+			DPrintf("[snapcommon][crash][%v] itres=%v, leader=%v\n", victim, i, leader1)
 			cfg.crash1(victim)
 			cfg.one(rand.Int(), servers-1, true)
 		}
 		// send enough to get a snapshot
 		for i := 0; i < SnapShotInterval+1; i++ {
 			cfg.rafts[sender].Start(rand.Int())
+			DPrintf("[snapcommon] itres=%v Start\n", i)
 		}
 		// let applier threads catch up with the Start()'s
 		cfg.one(rand.Int(), servers-1, true)
+		DPrintf("[snapcommon] itres=%v one\n", i)
 
 		if cfg.LogSize() >= MAXLOGSIZE {
 			cfg.t.Fatalf("Log size too large")
@@ -1067,12 +1071,14 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			// reconnect a follower, who maybe behind and
 			// needs to rceive a snapshot to catch up.
 			cfg.connect(victim)
+			DPrintf("[snapcommon][connect][%v] itres=%v, leader=%v\n", victim, i, leader1)
 			cfg.one(rand.Int(), servers, true)
 			leader1 = cfg.checkOneLeader()
 		}
 		if crash {
 			cfg.start1(victim, cfg.applierSnap)
 			cfg.connect(victim)
+			DPrintf("[snapcommon][connect][%v] itres=%v, leader=%v\n", victim, i, leader1)
 			cfg.one(rand.Int(), servers, true)
 			leader1 = cfg.checkOneLeader()
 		}

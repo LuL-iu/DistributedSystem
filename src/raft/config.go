@@ -8,19 +8,23 @@ package raft
 // test with the original before submitting.
 //
 
-import "6.824/labgob"
-import "6.824/labrpc"
-import "bytes"
-import "log"
-import "sync"
-import "testing"
-import "runtime"
-import "math/rand"
-import crand "crypto/rand"
-import "math/big"
-import "encoding/base64"
-import "time"
-import "fmt"
+import (
+	"bytes"
+	"log"
+	"math/rand"
+	"runtime"
+	"sync"
+	"testing"
+
+	"6.824/labgob"
+	"6.824/labrpc"
+
+	crand "crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"math/big"
+	"time"
+)
 
 func randstring(n int) string {
 	b := make([]byte, 2*n)
@@ -165,7 +169,7 @@ func (cfg *config) applier(i int, applyCh chan ApplyMsg) {
 				err_msg = fmt.Sprintf("server %v apply out of order %v", i, m.CommandIndex)
 			}
 			if err_msg != "" {
-			
+
 				log.Fatalf("applier apply error: %v\n", err_msg)
 				cfg.applyErr[i] = err_msg
 				// keep reading after error so that Raft doesn't block
@@ -181,6 +185,7 @@ const SnapShotInterval = 10
 func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 	for m := range applyCh {
 		if m.SnapshotValid {
+			cfg.mu.Lock()
 			if cfg.rafts[i].CondInstallSnapshot(m.SnapshotTerm,
 				m.SnapshotIndex, m.Snapshot) {
 				cfg.logs[i] = make(map[int]interface{})
@@ -192,6 +197,7 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 				}
 				cfg.logs[i][m.SnapshotIndex] = v
 			}
+			cfg.mu.Unlock()
 		} else if m.CommandValid {
 			cfg.mu.Lock()
 			err_msg, prevok := cfg.checkLogs(i, m)
@@ -210,6 +216,7 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 				e := labgob.NewEncoder(w)
 				v := m.Command
 				e.Encode(v)
+				DPrintf("[applierSnap] rafrs[%v].Snapshot\n", i)
 				cfg.rafts[i].Snapshot(m.CommandIndex, w.Bytes())
 			}
 		} else {
