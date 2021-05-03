@@ -1,0 +1,4 @@
+Test (2C): basic persistence ...
+labgob warning: Decoding into a non-default variable/field XLen may not work
+signal: interrupt
+FAIL	6.824/raft	1.956s

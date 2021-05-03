@@ -1,15 +1,17 @@
 package kvraft
 
 import (
-	"6.824/labgob"
-	"6.824/labrpc"
-	"6.824/raft"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
+
+	"6.824/labgob"
+	"6.824/labrpc"
+	"6.824/raft"
 )
 
-const Debug = false
+const Debug = true
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
@@ -18,32 +20,173 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	//0 get, 1 put, 2 append
+	Type int
+
+	Key      string
+	Value    string
+	SerialNo int
+}
+
+type replyCh struct {
+	Err Err
+	val string
+	Op  Op
 }
 
 type KVServer struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
-	dead    int32 // set by Kill()
+	mu        sync.Mutex
+	me        int
+	rf        *raft.Raft
+	applyCh   chan raft.ApplyMsg
+	dead      int32 // set by Kill()
+	applyCond *sync.Cond
+	quit      chan int
 
 	maxraftstate int // snapshot if log grows this big
 
+	kvTable   map[string]string
+	kvChanels map[int]chan replyCh
+	completed int
 	// Your definitions here.
 }
 
-
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
+	DPrintf("[KVServer][Get][%v] args.SerialNo: %v, kv.completed: %v, args.key: %v\n", kv.me, args.SerialNo, kv.completed, args.Key)
 	// Your code here.
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	// if args.SerialNo < kv.completed {
+	// 	if val, ok := kv.kvTable[args.Key]; ok {
+	// 		reply.Err = OK
+	// 		reply.Value = val
+	// 	} else {
+	// 		reply.Err = ErrNoKey
+	// 		reply.Value = ""
+	// 	}
+	// 	return
+	// }
+	Op := Op{0, args.Key, "", args.SerialNo}
+	kv.mu.Unlock()
+	index, term, isLeader := kv.rf.Start(Op)
+	kv.mu.Lock()
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	DPrintf("[KVServer][Get][%v] index: %v, term: %v\n", kv.me, index, term)
+	replyChanel := kv.kvChanels[index]
+	if replyChanel == nil {
+		replyChanel = make(chan replyCh, 1) // buffered chan so that applier won't block
+		kv.kvChanels[index] = replyChanel
+	}
+	kv.mu.Unlock()
+	result := <-kv.kvChanels[index]
+	DPrintf("[KVServer][Get][receiveResult][%v] args.SerialNo: %v, kv.completed: %v, args.key: %v, result.Err: %v, result.Op: %v, index: %v, term%v\n",
+		kv.me, args.SerialNo, kv.completed, args.Key, result.Err, result.Op, index, term)
+	kv.mu.Lock()
+	if result.Op == Op {
+		reply.Err = result.Err
+	} else {
+		reply.Err = ErrWrongLeader
+	}
+	reply.Value = result.val
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	DPrintf("[KVServer][PutAppend][%v] args.SerialNo: %v, kv.completed: %v, args.key: %v, args.Value: %v, args.Op: %v\n", kv.me, args.SerialNo, kv.completed, args.Key, args.Value, args.Op)
 	// Your code here.
+	// if args.SerialNo < kv.completed {
+	// 	reply.Err = OK
+	// 	return
+	// }
+	Op := Op{}
+	if args.Op == "Put" {
+		Op.Type = 1
+	} else {
+		Op.Type = 2
+	}
+	Op.Key = args.Key
+	Op.Value = args.Value
+	Op.SerialNo = args.SerialNo
+	kv.mu.Unlock()
+	index, term, isLeader := kv.rf.Start(Op)
+	kv.mu.Lock()
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	replyChanel := kv.kvChanels[index]
+	if replyChanel == nil {
+		replyChanel = make(chan replyCh, 1) // buffered chan so that applier won't block
+		kv.kvChanels[index] = replyChanel
+	}
+	kv.mu.Unlock()
+	DPrintf("[KVServer][PutAppend][%v] index: %v, term: %v\n", kv.me, index, term)
+	result := <-kv.kvChanels[index]
+	DPrintf("[KVServer][PutAppend][receiveResult][%v] args.SerialNo: %v, kv.completed: %v, args.key: %v, args.Value: %v, result.Err: %v, result.Op: %v, index: %v, term%v\n",
+		kv.me, args.SerialNo, kv.completed, args.Key, args.Value, result.Err, result.Op, index, term)
+	kv.mu.Lock()
+	if result.Op == Op {
+		reply.Err = result.Err
+	} else {
+		reply.Err = ErrWrongLeader
+	}
+}
+
+func (kv *KVServer) applyMsg() {
+	for {
+		select {
+		case applyMsg := <-kv.applyCh:
+			DPrintf("[kvServer][applyMsg][%v]receive apply, index: %v\n", kv.me, applyMsg.CommandIndex)
+			kv.handleCommand(applyMsg)
+		case <-kv.quit:
+			fmt.Println("quit")
+			return
+		}
+	}
+
+}
+
+func (kv *KVServer) handleCommand(applyMsg raft.ApplyMsg) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	command := applyMsg.Command.(Op)
+	DPrintf("[KVServer][applyMsg][%v]enter", kv.me)
+	replyCh := replyCh{}
+	replyCh.Err = OK
+	replyCh.val = ""
+	replyCh.Op = command
+	if command.Type == 0 {
+		if val, ok := kv.kvTable[command.Key]; ok {
+			replyCh.val = val
+		} else {
+			replyCh.Err = ErrNoKey
+		}
+	} else if command.Type == 1 {
+		kv.kvTable[command.Key] = command.Value
+	} else {
+		if val, ok := kv.kvTable[command.Key]; ok {
+			kv.kvTable[command.Key] = val + command.Value
+		} else {
+			kv.kvTable[command.Key] = command.Value
+		}
+		replyCh.val = kv.kvTable[command.Key]
+	}
+	if kv.kvChanels[applyMsg.CommandIndex] == nil {
+		return
+	}
+	DPrintf("[KVServer][applyMsg][%v]enterenter", kv.me)
+	kv.mu.Unlock()
+	kv.kvChanels[applyMsg.CommandIndex] <- replyCh
+	kv.mu.Lock()
+	DPrintf("[KVServer][applyMsg][%v] replyCh.Err: %v, replyCh.val: %v, replyCh.Op.Type: %v, replyCh.Op.serialNo: %v\n", kv.me, replyCh.Err, replyCh.val, replyCh.Op.Type, replyCh.Op.SerialNo)
 }
 
 //
@@ -59,6 +202,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
+	kv.quit <- 0
 	// Your code here, if desired.
 }
 
@@ -95,6 +239,11 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
+	kv.kvTable = make(map[string]string)
+	kv.kvChanels = make(map[int]chan replyCh)
+	kv.completed = -1
+	kv.quit = make(chan int)
+	go kv.applyMsg()
 	// You may need initialization code here.
 
 	return kv
