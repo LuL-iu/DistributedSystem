@@ -186,7 +186,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		e.Command = command
 		e.Term = term
 		rf.logEntries = append(rf.logEntries, e)
-
+		go rf.askPeersAppendEntries(rf.term)
 		rf.persist()
 
 	}
@@ -243,6 +243,7 @@ func (rf *Raft) applyMsg() {
 		if rf.lastApplied < rf.commitIndex && rf.lastApplied >= rf.index0-1 {
 
 			rf.lastApplied++
+			DPrintf("[%v][ApplyMsg]  rf.lastApplied : %v, rf.index0 : %v, commitIndex : %v \n", rf.me, rf.lastApplied, rf.index0, rf.commitIndex)
 			e := rf.logEntries[rf.lastApplied-rf.index0]
 			rf.lastAppliedTerm = rf.logEntries[rf.lastApplied-rf.index0].Term
 			applyMsg := ApplyMsg{}

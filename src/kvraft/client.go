@@ -12,6 +12,7 @@ type Clerk struct {
 	// You will have to modify this struct.
 	serialNo  int
 	curLeader int
+	id        int64
 }
 
 func nrand() int64 {
@@ -24,8 +25,9 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	ck.serialNo = 0
+	ck.serialNo = 1
 	ck.curLeader = 0
+	ck.id = nrand()
 	// You'll have to add code here.
 	return ck
 }
@@ -46,6 +48,7 @@ func (ck *Clerk) Get(key string) string {
 	args := GetArgs{}
 	args.Key = key
 	args.SerialNo = ck.serialNo
+	args.ClientId = ck.id
 	ck.serialNo++
 	reply := GetReply{}
 	i := ck.curLeader
@@ -82,6 +85,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.Op = op
 	args.Value = value
 	args.SerialNo = ck.serialNo
+	args.ClientId = ck.id
 	ck.serialNo++
 	reply := PutAppendReply{}
 	i := ck.curLeader

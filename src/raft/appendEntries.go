@@ -95,11 +95,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 	// DPrintf("[%v][AppendEntries] len(rf.logEntries)=%v args.PrevLogIndex=%v\n", rf.me, len(rf.logEntries), args.PrevLogIndex)
-	if len(rf.logEntries)+rf.index0 > args.PrevLogIndex+1 {
-		rf.logEntries = rf.logEntries[:args.PrevLogIndex+1-rf.index0]
-	}
+	// if len(rf.logEntries)+rf.index0 > args.PrevLogIndex+1 {
+	// 	rf.logEntries = rf.logEntries[:args.PrevLogIndex+1-rf.index0]
+	// }
 
-	rf.logEntries = append(rf.logEntries, args.Entries...)
+	rf.dealConflict(args)
+
+	// rf.logEntries = append(rf.logEntries, args.Entries...)
 	rf.persist()
 	min := Min(args.LeaderCommit, len(rf.logEntries)-1+rf.index0)
 	if args.LeaderCommit > rf.commitIndex {
@@ -109,6 +111,32 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 	reply.Success = true
 	// DPrintf("[%v][AppendEntries], len(rf.logEntries): %v, args.PrevLogTerm: %v\n", rf.me, len(rf.logEntries), args.PrevLogTerm)
+}
+
+func (rf *Raft) dealConflict(args *AppendEntriesArgs) {
+	entry := args.Entries
+	startIndex := args.PrevLogIndex + 1
+	i := 0
+
+	for i < len(entry) && startIndex < len(rf.logEntries)+rf.index0 {
+		if entry[i].Term != rf.logEntries[startIndex].Term {
+			break
+		}
+		i++
+		startIndex++
+	}
+
+	if i < len(entry) && startIndex < len(rf.logEntries)+rf.index0 {
+		rf.logEntries = rf.logEntries[:startIndex]
+		slice := entry[i:]
+		rf.logEntries = append(rf.logEntries, slice...)
+	}
+
+	if startIndex == len(rf.logEntries)+rf.index0 {
+		slice := entry[i:]
+		rf.logEntries = append(rf.logEntries, slice...)
+	}
+
 }
 
 func (rf *Raft) sendAppendEntriesRPC(p *labrpc.ClientEnd, index int, curTerm int, cond *sync.Cond, checked *int, finished *int) {
